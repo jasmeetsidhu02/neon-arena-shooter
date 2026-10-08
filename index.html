@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/neon-arena-shooter/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Arena — Three.js Shooter</title>
+    <script type="module" crossorigin src="/neon-arena-shooter/assets/index-BmhYtS9Q.js"></script>
+    <link rel="stylesheet" crossorigin href="/neon-arena-shooter/assets/index-C2ZgAnTF.css">
+  </head>
+  <body>
+    <div id="hud">
+      <div class="stat"><span class="label">Score</span><span id="score">0</span></div>
+      <div class="stat"><span class="label">Wave</span><span id="wave">1</span></div>
+      <div class="stat"><span class="label">Ammo</span><span id="ammo">12</span></div>
+      <div class="health">
+        <span class="label">Health</span>
+        <div class="bar"><div id="health-fill"></div></div>
+      </div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="damage"></div>
+    <div id="banner"></div>
+
+    <div id="overlay">
+      <div class="panel">
+        <h1>NEON ARENA</h1>
+        <p id="subtitle">Survive the drone waves.</p>
+        <button id="start">Click to Play</button>
+        <ul class="controls">
+          <li><b>WASD</b> move</li>
+          <li><b>Mouse</b> aim</li>
+          <li><b>Click</b> shoot</li>
+          <li><b>R</b> reload</li>
+          <li><b>Shift</b> sprint</li>
+          <li><b>Esc</b> pause</li>
+        </ul>
+      </div>
+    </div>
+
+  </body>
+</html>
