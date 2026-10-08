@@ -24,7 +24,11 @@ const ui = {
 
 // ---------- Renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Touch devices (phones/tablets) get on-screen controls and a lighter render load
+const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+if (isTouch) document.body.classList.add('touch');
+
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
@@ -46,7 +50,7 @@ sun.position.set(20, 40, 10);
 sun.castShadow = true;
 sun.shadow.camera.left = -ARENA; sun.shadow.camera.right = ARENA;
 sun.shadow.camera.top = ARENA; sun.shadow.camera.bottom = -ARENA;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(isTouch ? 1024 : 2048, isTouch ? 1024 : 2048);
 scene.add(sun);
 
 // ---------- Arena ----------
@@ -157,8 +161,109 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 let mouseDown = false;
-addEventListener('mousedown', (e) => { if (e.button === 0) mouseDown = true; });
-addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
+if (!isTouch) {
+  addEventListener('mousedown', (e) => { if (e.button === 0) mouseDown = true; });
+  addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
+}
+
+// ---------- Touch controls ----------
+// Left side: floating joystick to move. Right side: drag to aim.
+// FIRE button shoots while held and can also be dragged to aim.
+const touch = {
+  moveX: 0, moveY: 0,       // joystick, -1..1
+  moveId: null, originX: 0, originY: 0,
+  looks: new Map(),         // pointerId -> last {x, y}
+  fireId: null,
+};
+const JOY_RADIUS = 55;
+const LOOK_SENS = 0.006;
+const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const joystick = $('joystick');
+const knob = $('joystick-knob');
+const fireBtn = $('btn-fire');
+
+function applyLook(dx, dy) {
+  lookEuler.setFromQuaternion(camera.quaternion);
+  lookEuler.y -= dx * LOOK_SENS;
+  lookEuler.x -= dy * LOOK_SENS;
+  lookEuler.x = THREE.MathUtils.clamp(lookEuler.x, -Math.PI / 2 + 0.05, Math.PI / 2 - 0.05);
+  camera.quaternion.setFromEuler(lookEuler);
+}
+
+function resetJoystick() {
+  touch.moveId = null;
+  touch.moveX = touch.moveY = 0;
+  knob.style.transform = '';
+  joystick.style.left = joystick.style.top = joystick.style.bottom = '';
+  joystick.classList.remove('active');
+}
+
+function resetTouch() {
+  resetJoystick();
+  touch.looks.clear();
+  touch.fireId = null;
+  fireBtn.classList.remove('active');
+}
+
+const moveZone = $('move-zone');
+moveZone.addEventListener('pointerdown', (e) => {
+  if (touch.moveId !== null) return;
+  e.preventDefault();
+  moveZone.setPointerCapture(e.pointerId);
+  touch.moveId = e.pointerId;
+  touch.originX = e.clientX;
+  touch.originY = e.clientY;
+  // Joystick appears under the thumb
+  const size = joystick.offsetWidth;
+  joystick.style.left = `${e.clientX - size / 2}px`;
+  joystick.style.top = `${e.clientY - size / 2}px`;
+  joystick.style.bottom = 'auto';
+  joystick.classList.add('active');
+});
+moveZone.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== touch.moveId) return;
+  let dx = e.clientX - touch.originX;
+  let dy = e.clientY - touch.originY;
+  const len = Math.hypot(dx, dy);
+  if (len > JOY_RADIUS) { dx *= JOY_RADIUS / len; dy *= JOY_RADIUS / len; }
+  knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  touch.moveX = dx / JOY_RADIUS;
+  touch.moveY = dy / JOY_RADIUS;
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  moveZone.addEventListener(type, (e) => { if (e.pointerId === touch.moveId) resetJoystick(); });
+}
+
+function bindLook(el, isFire) {
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    touch.looks.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (isFire) { touch.fireId = e.pointerId; fireBtn.classList.add('active'); }
+  });
+  el.addEventListener('pointermove', (e) => {
+    const last = touch.looks.get(e.pointerId);
+    if (!last || state.mode !== 'playing') return;
+    applyLook(e.clientX - last.x, e.clientY - last.y);
+    last.x = e.clientX;
+    last.y = e.clientY;
+  });
+  for (const type of ['pointerup', 'pointercancel']) {
+    el.addEventListener(type, (e) => {
+      touch.looks.delete(e.pointerId);
+      if (e.pointerId === touch.fireId) { touch.fireId = null; fireBtn.classList.remove('active'); }
+    });
+  }
+}
+bindLook($('look-zone'), false);
+bindLook(fireBtn, true);
+
+$('btn-reload').addEventListener('pointerdown', (e) => { e.preventDefault(); startReload(); });
+$('btn-pause').addEventListener('pointerdown', (e) => { e.preventDefault(); pauseGame(); });
+
+// Stop iOS/Android from scrolling, zooming or long-press menus during play
+document.addEventListener('touchmove', (e) => { if (state.mode === 'playing') e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ---------- Game state ----------
 const state = {
@@ -208,7 +313,8 @@ function spawnEnemy() {
   enemies.push({
     mesh,
     hp: 2 + Math.floor(state.wave / 2),
-    speed: (isShooter ? 3 : 4.5) + state.wave * 0.35 + Math.random(),
+    // A touch screen is harder to aim with, so drones are a bit slower on phones
+    speed: ((isShooter ? 3 : 4.5) + state.wave * 0.35 + Math.random()) * (isTouch ? 0.85 : 1),
     shooter: isShooter,
     shootTimer: 1.5 + Math.random() * 2,
     bobOffset: Math.random() * Math.PI * 2,
@@ -280,31 +386,41 @@ function shoot() {
   muzzleFlash.intensity = 30;
 
   raycaster.setFromCamera(screenCenter, camera);
-  const targets = [...enemies.map((e) => e.mesh), ...obstacles.map((o) => o.mesh)];
-  const hits = raycaster.intersectObjects(targets, true);
+  const ray = raycaster.ray;
+
+  // Nearest pillar along the ray blocks the shot
+  const wallHit = raycaster.intersectObjects(obstacles.map((o) => o.mesh), false)[0];
+  const wallDist = wallHit ? wallHit.distance : Infinity;
+
+  // Enemies are treated as spheres; touch players get a slightly bigger hit radius (aim assist)
+  const hitRadius = isTouch ? 1.35 : 0.9;
+  let targetIdx = -1;
+  let targetDist = Infinity;
+  const toEnemy = new THREE.Vector3();
+  enemies.forEach((e, i) => {
+    toEnemy.subVectors(e.mesh.position, ray.origin);
+    const along = toEnemy.dot(ray.direction);
+    if (along <= 0 || along >= wallDist || along >= targetDist) return;
+    if (ray.distanceToPoint(e.mesh.position) < hitRadius) { targetIdx = i; targetDist = along; }
+  });
 
   const start = new THREE.Vector3();
   barrel.getWorldPosition(start);
-  let end = raycaster.ray.origin.clone().add(raycaster.ray.direction.clone().multiplyScalar(80));
+  let end = ray.origin.clone().addScaledVector(ray.direction, 80);
 
-  if (hits.length) {
-    const hit = hits[0];
-    end = hit.point.clone();
-    let obj = hit.object;
-    while (obj && !enemies.some((e) => e.mesh === obj)) obj = obj.parent;
-    const idx = enemies.findIndex((e) => e.mesh === obj);
-    if (idx !== -1) {
-      const e = enemies[idx];
-      e.hp--;
-      e.flash = 0.1;
-      sfx.hit();
-      ui.crosshair.classList.add('hit');
-      setTimeout(() => ui.crosshair.classList.remove('hit'), 90);
-      burst(hit.point, 0xffffff, 8);
-      if (e.hp <= 0) killEnemy(idx);
-    } else {
-      burst(hit.point, 0x00f0ff, 6);
-    }
+  if (targetIdx !== -1) {
+    const e = enemies[targetIdx];
+    end = e.mesh.position.clone();
+    e.hp--;
+    e.flash = 0.1;
+    sfx.hit();
+    ui.crosshair.classList.add('hit');
+    setTimeout(() => ui.crosshair.classList.remove('hit'), 90);
+    burst(end, 0xffffff, 8);
+    if (e.hp <= 0) killEnemy(targetIdx);
+  } else if (wallHit) {
+    end = wallHit.point.clone();
+    burst(end, 0x00f0ff, 6);
   }
 
   // Tracer
@@ -396,39 +512,69 @@ function resetGame() {
   nextWave();
 }
 
+function setPlaying() {
+  state.mode = 'playing';
+  ui.overlay.classList.add('hidden');
+  document.body.classList.add('playing');
+}
+
+function showOverlay(subtitleHtml, buttonText) {
+  mouseDown = false;
+  resetTouch();
+  document.body.classList.remove('playing');
+  ui.subtitle.innerHTML = subtitleHtml;
+  ui.start.textContent = buttonText;
+  ui.overlay.classList.remove('hidden');
+}
+
+function pauseGame() {
+  if (state.mode !== 'playing') return;
+  state.mode = 'paused';
+  showOverlay('Paused', 'Resume');
+}
+
 function gameOver() {
   state.mode = 'over';
   controls.unlock();
-  ui.subtitle.innerHTML = `Game over — you scored <b>${state.score}</b> on wave ${state.wave}.`;
-  ui.start.textContent = 'Play Again';
-  ui.overlay.classList.remove('hidden');
+  showOverlay(`Game over — you scored <b>${state.score}</b> on wave ${state.wave}.`, 'Play Again');
 }
 
 ui.start.addEventListener('click', () => {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   if (state.mode === 'menu' || state.mode === 'over') resetGame();
-  controls.lock();
-});
 
-controls.addEventListener('lock', () => {
-  state.mode = 'playing';
-  ui.overlay.classList.add('hidden');
-});
-controls.addEventListener('unlock', () => {
-  mouseDown = false;
-  if (state.mode === 'playing') {
-    state.mode = 'paused';
-    ui.subtitle.textContent = 'Paused';
-    ui.start.textContent = 'Resume';
-    ui.overlay.classList.remove('hidden');
+  if (isTouch) {
+    // No pointer lock on phones: go fullscreen + landscape where the browser allows it
+    const el = document.documentElement;
+    const fs = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (fs && !document.fullscreenElement) {
+      Promise.resolve(fs.call(el))
+        .then(() => screen.orientation?.lock?.('landscape'))
+        .catch(() => {});
+    }
+    setPlaying();
+  } else {
+    controls.lock();
   }
 });
 
-addEventListener('resize', () => {
+controls.addEventListener('lock', setPlaying);
+controls.addEventListener('unlock', pauseGame);
+
+// Pause if the player switches apps / tabs
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+
+function fitCamera() {
   camera.aspect = window.innerWidth / window.innerHeight;
+  // Wider vertical FOV in portrait so phones don't get a narrow keyhole view
+  camera.fov = camera.aspect < 1 ? 95 : 75;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+}
+addEventListener('resize', fitCamera);
+fitCamera();
+if (isTouch) ui.start.textContent = 'Tap to Play';
 
 // ---------- Main loop ----------
 const clock = new THREE.Clock();
@@ -449,18 +595,19 @@ function update(dt) {
     }
   }
 
-  if (mouseDown) shoot();
+  if (mouseDown || touch.fireId !== null) shoot();
 
-  // Movement
+  // Movement (keyboard + analog joystick)
   const speed = keys.ShiftLeft || keys.ShiftRight ? SPRINT_SPEED : WALK_SPEED;
   moveDir.set(
-    (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0),
+    (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + touch.moveX,
     0,
-    (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)
+    (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - touch.moveY
   );
-  const moving = moveDir.lengthSq() > 0;
+  const moveLen = moveDir.length();
+  const moving = moveLen > 0.08;
   if (moving) {
-    moveDir.normalize();
+    if (moveLen > 1) moveDir.divideScalar(moveLen);
     controls.moveRight(moveDir.x * speed * dt);
     controls.moveForward(moveDir.z * speed * dt);
     bobTime += dt * speed;
@@ -599,4 +746,4 @@ renderer.setAnimationLoop(animate);
 updateHUD();
 
 // Expose for debugging / automated smoke tests
-window.__game = { state, enemies, shoot, update, resetGame };
+window.__game = { state, enemies, shoot, update, resetGame, touch, camera };

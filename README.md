@@ -15,6 +15,20 @@ Survive endless waves of neon drones. Pink drones chase you down; orange drones 
 | Shift | Sprint |
 | Esc | Pause |
 
+### On mobile
+
+Works on phones and tablets with touch controls (best in landscape):
+
+| Touch | Action |
+| --- | --- |
+| Left thumb (anywhere on left side) | Floating joystick to move |
+| Right thumb drag | Aim |
+| FIRE button | Shoot while held; drag it to aim at the same time |
+| R button | Reload |
+| II button | Pause |
+
+Phones get light aim assist, slightly slower drones, and a lighter render load.
+
 ## Features
 
 - Pointer-lock FPS controls with collision against pillars and walls
